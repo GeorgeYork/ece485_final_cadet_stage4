@@ -80,6 +80,7 @@ architecture Behavioral of riscv_pipeline is
     signal stall_counter : integer range 0 to 3 := 0;
     signal mux_select_A  : STD_LOGIC_VECTOR(1 downto 0) := (others => '0');
     signal mux_select_B  : STD_LOGIC_VECTOR(1 downto 0) := (others => '0');
+    signal branch_reg1_data : STD_LOGIC_VECTOR(31 downto 0);
     
     component pc_live 
     Port (
@@ -163,7 +164,6 @@ architecture Behavioral of riscv_pipeline is
             clk         : in  STD_LOGIC;
             reset       : in  STD_LOGIC;
             start_stall : in  STD_LOGIC;
-            stall_counter : in integer;
             
             -- IF/ID pipeline registers
             reg_write : in STD_LOGIC;
@@ -231,22 +231,34 @@ architecture Behavioral of riscv_pipeline is
             rs1      : in STD_LOGIC_VECTOR(4 downto 0);         -- current  instr source register
             rs2      : in STD_LOGIC_VECTOR(4 downto 0);         -- current  instr source register
             -- need any other input registers?
-            stall_counter  : in integer range 0 to 3 := 0;
-            start_stall    : out STD_LOGIC;
-            double_stall   : out STD_LOGIC
+            start_stall    : out STD_LOGIC
         );
     end component;
 
-    component forwarding_unit is
-      Port (
-          ex_mem_reg_write : in STD_LOGIC;
-          mem_wb_mem_read  : in STD_LOGIC;
-          mem_wb_load_addr : in STD_LOGIC;
-          ex_mem_rd        : in STD_LOGIC_VECTOR(4 downto 0);
-          mem_wb_rd        : in STD_LOGIC_VECTOR(4 downto 0);
-          id_ex_rs1        : in STD_LOGIC_VECTOR(4 downto 0);
-          mux_select_A     : out STD_LOGIC_VECTOR(1 downto 0)
-      );
+    component branch_forwarding_unit is
+          Port (
+                ex_mem_alu_result : in STD_LOGIC_VECTOR(31 downto 0);
+                mem_wb_mem_data   : in STD_LOGIC_VECTOR(31 downto 0);
+                reg1_data         : in STD_LOGIC_VECTOR(31 downto 0);
+                if_id_rs1         : in STD_LOGIC_VECTOR(4 downto 0);
+                ex_mem_rd         : in STD_LOGIC_VECTOR(4 downto 0);
+                mem_wb_rd         : in STD_LOGIC_VECTOR(4 downto 0);
+                ex_mem_reg_write  : in STD_LOGIC;
+                mem_wb_mem_read   : in STD_LOGIC;
+                branch_reg1_data  : out STD_LOGIC_VECTOR(31 downto 0)
+          );
+    end component; 
+    
+    component alu_forwarding_unit is
+          Port (
+              ex_mem_reg_write : in STD_LOGIC;
+              mem_wb_mem_read  : in STD_LOGIC;
+              mem_wb_load_addr : in STD_LOGIC;
+              ex_mem_rd        : in STD_LOGIC_VECTOR(4 downto 0);
+              mem_wb_rd        : in STD_LOGIC_VECTOR(4 downto 0);
+              id_ex_rs1        : in STD_LOGIC_VECTOR(4 downto 0);
+              mux_select_A     : out STD_LOGIC_VECTOR(1 downto 0)
+          );
     end component;
     
 begin
@@ -280,7 +292,6 @@ begin
             clk    => clk,
             reset  => reset,
             start_stall => start_stall,
-            stall_counter => stall_counter,
             -- inputs from IF
             reg_write => reg_write,
             alu_src => alu_src,
@@ -343,16 +354,8 @@ begin
             addr  => pc_byte_not_word,
             instr => instr
         );   
-    -- IF/ID pipeline registers [not needed due to pipeline registers?]
-    --if_id_instr <= instr;
-    --if_id_npc    <= NPC;
-
-    -- Decode instruction fields [not needed due to pipeline registers?]
-    --if_id_rs1 <= if_id_instr(<define bit> downto<define bit>);
-    --if_id_rs2 <= if_id_instr(<define bit> downto<define bit>);
-    --if_id_rd  <= if_id_instr(<define bit> downto<define bit>);
     
-    opcode <= if_id_instr(<define bit> downto<define bit>);
+    opcode <= if_id_instr(<define bit> downto <define bit>);
 
     -- Control unit
     control_unit_inst: control_unit
@@ -366,13 +369,6 @@ begin
             load_addr => load_addr,
             jump      => jump
         );
---    if_id_reg_write <= reg_write; [not needed due to pipeline registers?]
---    if_id_mem_read <= mem_read;
---    if_id_mem_write <= mem_write;
---    if_id_alu_src <= alu_src;
---    if_id_branch <= branch;
---    if_id_load_addr <= load_addr;
---    if_id_jump    <= jump;
 
     -- ALU control unit
     alu_control_inst: alu_control
@@ -386,68 +382,47 @@ begin
     hazard_unit: hazard_detection_unit
         port map (
             reset => reset,
-            if_id_mem_read => if_id_mem_read,
+            if_id_mem_read  => if_id_mem_read,
             if_id_load_addr => if_id_load_addr,
-            instr    => instr,
-            if_id_instr    => if_id_instr,
-            if_id_rd       => if_id_rd,
-            rs1      => instr(19 downto 15),
-            rs2      => instr(24 downto 20),
+            instr           => instr,
+            if_id_instr     => if_id_instr,
+            if_id_rd        => if_id_rd,
+            rs1             => <what control signal?>,
+            rs2             => <what control signal?>,
             -- need any other input registers?
-            stall_counter  => stall_counter,
-            start_stall    => start_stall,
-            double_stall   => double_stall
+            start_stall    => start_stall
         );
-        
-    -- Stall counter process
-    process(clk)
-    begin
-        if rising_edge(clk) then
-            if reset = '1' then
-                stall_counter <= 0;
-             elsif stall_counter > 0 then
-                    stall_counter <= stall_counter - 1;
-             elsif start_stall = '1' then
-                --stall_counter <= 3;
-                --stall_counter <= 2;  -- needed to support BNE [after previous stall]
-                --stall_counter <= 1;
-            end if;
-        end if;
-    end process;
-
-    -- Stall signal
-    stall <= '1' when stall_counter > 0 else '0';        
-        
-    -- forwarding unit
-    forward_unit: forwarding_unit
-        port map (
-            ex_mem_reg_write => ex_mem_reg_write,
-            mem_wb_mem_read  => mem_wb_mem_read,
-            mem_wb_load_addr => mem_wb_load_addr,
-            ex_mem_rd        => ex_mem_rd,
-            mem_wb_rd        => mem_wb_rd,
-            id_ex_rs1        => id_ex_rs1,
-            -- need any other input or output registers?
-            mux_select_A     => mux_select_A
-        );
-
+    
 --------------------------------------------------------------------------------
     -- ID units
     -- Register file [used in ID and WB stages]
-	reg_write_chip <= mem_wb_reg_write;
     reg_file_inst: reg_file
         port map (
             clk       => clk,
-            reg_write => reg_write_chip,
-            rs1       => if_id_rs1,
-            rs2       => if_id_rs2,
-            rd        => mem_wb_rd,
-            data_in   => wb_data,
+            reg_write => <what control signal?>,
+            rs1       => <what control signal?>,
+            rs2       => <what control signal?>,
+            rd        => <what control signal?>,
+            data_in   => <what data signal?>,
             data_out1 => reg1_data,
             data_out2 => reg2_data
         );    
     if_id_reg1_data <= reg1_data;  
     if_id_reg2_data <= reg2_data;
+
+    -- branch forward unit 
+    branch_forward_unit: branch_forwarding_unit
+        port map (
+            ex_mem_alu_result => ex_mem_alu_result,
+            mem_wb_mem_data => mem_wb_mem_data,
+            reg1_data => reg1_data,
+            if_id_rs1 => if_id_rs1,
+            ex_mem_rd => ex_mem_rd,
+            mem_wb_rd => mem_wb_rd,
+            ex_mem_reg_write => ex_mem_reg_write,
+            mem_wb_mem_read => mem_wb_mem_read,
+            branch_reg1_data => branch_reg1_data
+        );  
          
     -- Immediate generator
         immediate_generator_inst: immediate_generator
@@ -459,10 +434,9 @@ begin
     -- Comparator 
     not_equal_flag <= '1' when <what do we compare to decide if we should branch?> else '0';
                                         
-    next_pc <=  pc when (<what stall control signals?>) else   -- stall case, single and double
-                <math based on NPC and imm> when (<what control signals?>) else -- branch case, single stall
-                <math based on NPC and imm> when (<what control signals?>) else -- branch case, double stall
-                <math based on NPC and imm> when (<what control signals?>) else  -- jump case
+    next_pc <=  <math based on NPC and imm> when (<what control signals?>) else -- branch case, single stall
+                <math based on NPC and imm> when (<what control signals?>) else  -- jump case, single stall
+                pc when (<what stall control signals?>) else   --stall case, for alu dependencies (not branch or jump)
                 NPC when (<what control signals?>);    
                 
     -- ID/EX pipeline registers
@@ -476,7 +450,20 @@ begin
     --       01 forward from alu output
     --       10 forward from memory output
     --       11 forward from custom LoadAddr
-    
+
+    -- forwarding unit
+    alu_forward_unit: alu_forwarding_unit
+        port map (
+            ex_mem_reg_write => ex_mem_reg_write,
+            mem_wb_mem_read  => mem_wb_mem_read,
+            mem_wb_load_addr => mem_wb_load_addr,
+            ex_mem_rd        => ex_mem_rd,
+            mem_wb_rd        => mem_wb_rd,
+            id_ex_rs1        => id_ex_rs1,
+            -- need any other input or output registers?
+            mux_select_A     => mux_select_A
+        );
+            
     alu_input_a <= <which register?> when mux_select_A = "00" else
                    <which register?> when mux_select_A = "01" else
                    <which register?> when mux_select_A = "10" else
@@ -495,8 +482,6 @@ begin
         );
     id_ex_alu_result <= alu_result;
 
-    -- EX/MEM pipeline register
-
 ----------------------------------------------------------------------------------------
     --  MEM units
     
@@ -513,7 +498,6 @@ begin
         mem_wb_mem_data <= mem_data;  
          
     -- MEM/WB pipeline register
-
 
 ------------------------------------------------------------------------------------------
     -- WB Units
